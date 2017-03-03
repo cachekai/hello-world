@@ -1,0 +1,46 @@
+#!/bin/bash
+#Filename: intruder_detect.sh
+#Description: Intruder report tool with auth.log input
+
+AUTHLOG=/var/log/audit/audit.log
+
+if [[ -n $1 ]]; then 
+  AUTHLOG=$1
+  echo Using Log File : $AUTHLOG
+fi 
+
+LOG=/tmp/valid.$$.log 
+grep -v "invalid" $AUTHLOG| grep -i "failed" > $LOG
+
+users=$(awk '{ print $(NF-5) }' $LOG | sed -e 's/acct="//' -e 's/"//'| sort | uniq)
+#users=$(awk '{ print $(NF-5) }' $LOG | sed 's/acct="//' | sed 's/"//'| sort | uniq)
+
+printf "%-5s|%-10s|%-10s|%-13s|%s\n" "Sr#" "User" "Attempts" "IP address" "Time range" 
+
+ucount=0
+
+ip_list="$(egrep -o "[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" $LOG | sort | uniq)"
+
+for ip in $ip_list; do
+  grep $ip $LOG > /tmp/temp.$$.log
+
+  for user in $users; do 
+    grep $user /tmp/temp.$$.log > /tmp/$$.log
+    awk -F "(" '{print $2}' /tmp/$$.log |cut -c-10 > $$.time
+    tstart=$(head -1 $$.time)
+    start=$(date -d @$tstart)
+    tend=$(tail -1 $$.time)
+    end=$(date -d @$tend)
+
+    limit=$(( tend - tstart ))
+    if [[ $limit > 120 ]]; then 
+      let ucount++;
+      IP=$(egrep -o "[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" /tmp/$$.log | head -1)
+      TIME_RANGE="$start-->$end"
+      ATTEMPTS=$(cat /tmp/$$.log|wc -l)
+      printf "%-5s|%-10s|%-10s|%-13s|%-s\n" "$ucount" "$user" "$ATTEMPTS" "$IP" "$TIME_RANGE"
+    fi
+  done
+done
+
+rm /tmp/valid.$$.log /tmp/$$.log $$.time /tmp/temp.$$.log 2>/dev/null
